@@ -1,296 +1,553 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardHeader, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Building, Wallet, Plus, RefreshCw } from 'lucide-react';
-import { Textarea } from '@/components/ui/textarea';
+import { Card, CardHeader, CardContent } from './components/ui/card';
+import { Button } from './components/ui/button';
+import { Input } from './components/ui/input';
+import { Alert, AlertDescription } from './components/ui/alert';
+import { Building, Wallet, Plus, RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
+import { Textarea } from './components/ui/textarea';
+import { ScrollArea } from './components/ui/scroll-area';
+import ContractDetails from './components/ui/ContractDetails';
+import { initializeWeb3, initializeContract, connectWallet, switchToHardhatNetwork, formatPrice, validatePropertyData } from './utilsApp/web3';
+import { displayErrorMessage } from './utilsApp/errors';
 
-const CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // This is the default local deployment address
-const CONTRACT_ABI = [
-  "function createProperty(string memory _id, string memory _title, string memory _description, uint256 _price, string memory _location, string[] memory _documents) public",
-  "function getAllProperties() public view returns (tuple(string id, string title, string description, uint256 price, string location, address owner, string[] documents, bool isActive, uint256 createdAt)[] memory)",
-  "function createContract(string memory _contractId, string memory _propertyId) public payable",
-  "event PropertyListed(string id, string title, string location, uint256 price, address owner, uint256 timestamp)",
-  "event PropertySold(string propertyId, string contractId, address buyer, address seller, uint256 value, uint256 timestamp)"
-];
+
 
 const RealEstateApp = () => {
-  const [account, setAccount] = useState('');
-  const [contract, setContract] = useState(null);
-  const [properties, setProperties] = useState([]);
-  const [newProperty, setNewProperty] = useState({
-    id: '',
-    title: '',
-    description: '',
-    location: '',
-    price: '',
-    documents: []
-  });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (account) {
-      initializeContract();
-    }
-  }, [account]);
-
-  const initializeContract = async () => {
-    try {
-      if (window.ethereum) {
-        const web3 = new Web3(window.ethereum);
-        const realEstateContract = new web3.eth.Contract(CONTRACT_ABI, CONTRACT_ADDRESS);
-        setContract(realEstateContract);
-        await loadProperties();
-      }
-    } catch (err) {
-      setError('Failed to initialize contract');
-      console.error(err);
-    }
-  };
-
-  const connectWallet = async () => {
-    try {
-      if (window.ethereum) {
-        const accounts = await window.ethereum.request({
-          method: 'eth_requestAccounts'
-        });
-        setAccount(accounts[0]);
-      } else {
-        setError('Please install MetaMask to use this application');
-      }
-    } catch (err) {
-      setError('Failed to connect wallet');
-      console.error(err);
-    }
-  };
-
-  const loadProperties = async () => {
-    try {
-      const allProperties = await contract.methods.getAllProperties().call();
-      setProperties(allProperties);
-    } catch (err) {
-      setError('Failed to load properties');
-      console.error(err);
-    }
-  };
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setNewProperty(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-
-    try {
-      const web3 = new Web3(window.ethereum);
-      const priceInWei = web3.utils.toWei(newProperty.price, 'ether');
-      
-      await contract.methods.createProperty(
-        newProperty.id,
-        newProperty.title,
-        newProperty.description,
-        priceInWei,
-        newProperty.location,
-        []  // Empty documents array for now
-      ).send({ from: account });
-      
-      await loadProperties();
-      
-      setNewProperty({
+    const [isLoading, setIsLoading] = useState(true);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [account, setAccount] = useState('');
+    const [contract, setContract] = useState(null);
+    const [web3Instance, setWeb3Instance] = useState(null);
+    const [properties, setProperties] = useState([]);
+    const [error, setError] = useState('');
+    const [connectionStatus, setConnectionStatus] = useState('Initializing...');
+    const [newProperty, setNewProperty] = useState({
         id: '',
         title: '',
         description: '',
         location: '',
         price: '',
         documents: []
-      });
-    } catch (err) {
-      setError('Failed to list property');
-      console.error(err);
-    } finally {
-      setLoading(false);
+    });
+
+    const loadProperties = async (contractInstance = contract) => {
+        try {
+            if (!contractInstance) throw new Error('Contract not initialized');
+            const results = await contractInstance.methods.getAllProperties().call();
+            setProperties(results || []);
+        } catch (err) {
+            setError(displayErrorMessage(err, 'Failed to load properties'));
+        }
+    };
+
+    const handleAccountChange = async (accounts) => {
+        if (accounts.length > 0) {
+            setAccount(accounts[0]);
+            await loadProperties(contract);
+        } else {
+            setAccount('');
+            setProperties([]);
+            setError('Please connect your wallet');
+        }
+    };
+
+    const handleChainChange = () => {
+        window.location.reload();
+    };
+
+    const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setNewProperty(prev => ({
+            ...prev,
+            [name]: value
+        }));
+    };
+   
+   
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setIsProcessing(true);
+        setError('');
+
+        try {
+            if (!contract || !account || !web3Instance) {
+                throw new Error('Please ensure your wallet is connected');
+            }
+
+            validatePropertyData(newProperty);
+            const priceInWei = web3Instance.utils.toWei(newProperty.price, 'ether');
+
+            await contract.methods.createProperty(
+                newProperty.id,
+                newProperty.title,
+                newProperty.description,
+                priceInWei,
+                newProperty.location,
+                []
+            ).send({
+                from: account,
+                gas: 500000
+            });
+
+            await loadProperties();
+            setNewProperty({
+                id: '',
+                title: '',
+                description: '',
+                location: '',
+                price: '',
+                documents: []
+            });
+        } catch (err) {
+            setError(displayErrorMessage(err, 'Property Creation Error'));
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+
+    // const handlePurchase = async (propertyId) => {
+    //     setIsProcessing(true);
+    //     setError('');
+
+    //     try {
+    //     // Validate connection and requirements
+    //     if (!contract || !account || !web3Instance) {
+    //         throw new Error('Please ensure your wallet is connected');
+    //     }
+
+    //     // Find the property
+    //     const property = properties.find(p => p.id === propertyId);
+    //     if (!property) {
+    //         throw new Error('Property not found');
+    //     }
+
+    //     // Verify user has sufficient balance
+    //     const balance = await web3Instance.eth.getBalance(account);
+    //     if (BigInt(balance) < BigInt(property.price)) {
+    //         throw new Error('Insufficient funds to complete the purchase');
+    //     }
+
+    //     const contractId = `${propertyId}-${Date.now()}`;
+
+    //     // Get gas estimation with try-catch
+    //     let gasEstimate;
+    //     try {
+    //         gasEstimate = await contract.methods
+    //             .createContract(contractId, propertyId)
+    //             .estimateGas({
+    //                 from: account,
+    //                 value: property.price
+    //             });
+    //     } catch (gasError) {
+    //         console.error('Gas estimation error:', gasError);
+    //         // Check for specific error messages
+    //         if (gasError.message.includes('Property must be verified')) {
+    //             throw new Error('This property must be verified before purchase');
+    //         }
+    //         throw new Error('Failed to estimate gas. The transaction may fail.');
+    //     }
+
+    //     // Get current gas price
+    //     const gasPrice = await web3Instance.eth.getGasPrice();
+        
+    //     // Add 20% buffer to gas estimate
+    //     const gasLimit = Math.ceil(gasEstimate * 1.2);
+
+    //     // Execute the transaction with specific parameters
+    //     const transaction = await contract.methods
+    //         .createContract(contractId, propertyId)
+    //         .send({
+    //             from: account,
+    //             value: property.price,
+    //             gas: gasLimit,
+    //             gasPrice: gasPrice,
+    //             maxFeePerGas: null, // Let MetaMask handle this
+    //             maxPriorityFeePerGas: null // Let MetaMask handle this
+    //         });
+
+    //     // Wait for transaction receipt
+    //     const receipt = await web3Instance.eth.getTransactionReceipt(transaction.transactionHash);
+        
+    //     if (!receipt.status) {
+    //         throw new Error('Transaction failed. Please check the transaction on block explorer.');
+    //     }
+
+    //     // Reload properties and show success
+    //     await loadProperties();
+    //     setError('Purchase completed successfully!');
+        
+    //   } catch (err) {
+    //     console.error('Purchase error:', err);
+        
+    //     // Handle specific error cases
+    //     if (err.message.includes('User denied transaction')) {
+    //         setError('Transaction was cancelled by user');
+    //     } else if (err.message.includes('insufficient funds')) {
+    //         setError('Insufficient funds to complete the purchase');
+    //     } else if (err.message.includes('Property must be verified')) {
+    //         setError('This property must be verified before purchase. Please contact the administrator.');
+    //     } else {
+    //         setError(`Failed to purchase property: ${err.message}`);
+    //     }
+    //   } finally {
+    //     setIsProcessing(false);
+    //   }
+    // };
+    const handlePurchase = async (propertyId) => {
+        setIsProcessing(true);
+        setError('');
+    
+        try {
+            if (!contract || !account) {
+                throw new Error('Please connect your wallet first');
+            }
+    
+            const property = properties.find(p => p.id === propertyId);
+            if (!property) {
+                throw new Error('Property not found');
+            }
+    
+            // Check if property is active
+            if (!property.isActive) {
+                throw new Error('Property is not available for purchase');
+            }
+    
+            // Check if sender is not the owner
+            if (property.owner.toLowerCase() === account.toLowerCase()) {
+                throw new Error('You cannot purchase your own property');
+            }
+    
+            const contractId = `${propertyId}-${Date.now()}`;
+    
+            // Convert price to string to avoid BigInt issues
+            const propertyPrice = property.price.toString();
+            
+            // Log transaction details for debugging
+            console.log('Transaction details:', {
+                contractId,
+                propertyId,
+                price: propertyPrice,
+                from: account
+            });
+    
+            const transaction = await contract.methods
+                .createContract(contractId, propertyId)
+                .send({
+                    from: account,
+                    value: propertyPrice,
+                    gas: 500000,
+                    gasPrice: await web3Instance.eth.getGasPrice()
+                });
+    
+            console.log('Transaction successful:', transaction);
+            await loadProperties();
+            setError('Purchase completed successfully!');
+            
+        } catch (err) {
+            console.error('Detailed purchase error:', err);
+            if (err.message.includes('insufficient funds')) {
+                setError('You do not have enough funds to complete this purchase');
+            } else if (err.message.includes('Property is not available')) {
+                setError('This property is not available for purchase');
+            } else if (err.message.includes('own property')) {
+                setError('You cannot purchase your own property');
+            } else {
+                setError('Failed to complete purchase. Please check your wallet and try again.');
+            }
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+   
+
+
+
+    const initializeBlockchain = async () => {
+        setIsLoading(true);
+        setError('');
+        
+        try {
+            setConnectionStatus('Initializing Web3...');
+            const web3 = await initializeWeb3();
+            setWeb3Instance(web3);
+    
+            // Get accounts after web3 initialization
+            const accounts = await web3.eth.getAccounts();
+            if (accounts.length > 0) {
+                setAccount(accounts[0]);
+            }
+    
+            setConnectionStatus('Checking network...');
+            const chainId = await web3.eth.getChainId();
+            
+            if (chainId !== 31337) {
+                setConnectionStatus('Switching to Hardhat network...');
+                await switchToHardhatNetwork();
+            }
+    
+            setConnectionStatus('Initializing contract...');
+            const contractInstance = await initializeContract(web3);
+            setContract(contractInstance);
+            
+            await loadProperties(contractInstance);
+            setConnectionStatus('Connected');
+            
+        } catch (err) {
+            console.error('Initialization error:', err);
+            setError(displayErrorMessage(err, 'Initialization Error'));
+            setConnectionStatus('Connection failed');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        const init = async () => {
+            await initializeBlockchain();
+            if (window.ethereum) {
+                window.ethereum.on('chainChanged', () => {
+                    window.location.reload();
+                });
+                
+                window.ethereum.on('accountsChanged', handleAccountChange);
+            }
+        };
+        init();
+        
+        return () => {
+            if (window.ethereum) {
+                window.ethereum.removeListener('accountsChanged', handleAccountChange);
+                window.ethereum.removeListener('chainChanged', handleChainChange);
+            }
+        };
+    }, []);
+
+
+    
+
+
+
+    if (isLoading) {
+        return (
+            <div className="container mx-auto p-4 min-h-screen flex items-center justify-center">
+                <div className="text-center">
+                    <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+                    <h2 className="text-xl font-semibold mb-2">Connecting to Blockchain</h2>
+                    <p className="text-gray-600">{connectionStatus}</p>
+                </div>
+            </div>
+        );
     }
-  };
 
-  const handlePurchase = async (propertyId) => {
-    setLoading(true);
-    setError('');
+    return (
+        <div className="container mx-auto p-4 min-h-screen">
+            <Card className="mb-6">
+                <CardHeader>
+                    <div className="flex justify-between items-center">
+                        <h1 className="text-2xl font-bold">Real Estate DApp</h1>
+                        <div className="flex gap-2">
+                            <Button 
+                                onClick={() => loadProperties()} 
+                                disabled={!contract || isProcessing}
+                                className="flex items-center gap-2"
+                            >
+                                <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
+                                Refresh
+                            </Button>
+                            <Button 
+                                //onClick={connectWallet}
+                                onClick={async () => {
+                                    try {
+                                        const { address, web3Instance } = await connectWallet();
+                                        setAccount(address);
+                                        setWeb3Instance(web3Instance);
+                                        await loadProperties(contract);
+                                    } catch (err) {
+                                        setError(err.message);
+                                    }
+                                }}
 
-    try {
-      const property = properties.find(p => p.id === propertyId);
-      const contractId = `${propertyId}-${Date.now()}`;
-      
-      await contract.methods.createContract(
-        contractId,
-        propertyId
-      ).send({ 
-        from: account,
-        value: property.price 
-      });
-      
-      await loadProperties();
-    } catch (err) {
-      setError('Failed to purchase property');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+                                ///////
+                                disabled={isProcessing}
+                                className="flex items-center gap-2"
+                            >
+                                <Wallet className="h-4 w-4" />
+                                {account ? `${account.slice(0, 6)}...${account.slice(-4)}` : 'Connect Wallet'}
+                            </Button>
+                        </div>
+                    </div>
+                </CardHeader>
+            </Card>
 
-  const formatPrice = (priceInWei) => {
-    if (!window.ethereum) return '0';
-    const web3 = new Web3(window.ethereum);
-    return web3.utils.fromWei(priceInWei, 'ether');
-  };
+            {error && (
+                <Alert variant="destructive" className="mb-6">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription className="ml-2">{error}</AlertDescription>
+                </Alert>
+            )}
 
-  const PropertyCard = ({ property }) => (
-    <Card className="p-4">
-      <div className="space-y-2">
-        <h3 className="font-semibold">{property.title}</h3>
-        <div className="text-sm text-gray-600">
-          <p>{property.description}</p>
-          <p>Location: {property.location}</p>
-          <p>Price: {formatPrice(property.price)} ETH</p>
-          <p className="truncate">Owner: {property.owner}</p>
-          <p>Status: {property.isActive ? 'Active' : 'Sold'}</p>
+            <div className="grid md:grid-cols-2 gap-6">
+                <Card>
+                    <CardHeader>
+                        <h2 className="text-xl font-semibold flex items-center gap-2">
+                            <Plus className="h-5 w-5" />
+                            List New Property
+                        </h2>
+                    </CardHeader>
+                    <CardContent>
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <Input
+                                name="id"
+                                placeholder="Property ID"
+                                value={newProperty.id}
+                                onChange={handleInputChange}
+                                required
+                                disabled={isProcessing}
+                            />
+                            <Input
+                                name="title"
+                                placeholder="Property Title"
+                                value={newProperty.title}
+                                onChange={handleInputChange}
+                                required
+                                disabled={isProcessing}
+                            />
+                            <Textarea
+                                name="description"
+                                placeholder="Property Description"
+                                value={newProperty.description}
+                                onChange={handleInputChange}
+                                required
+                                disabled={isProcessing}
+                                className="min-h-[100px]"
+                            />
+                            <Input
+                                name="location"
+                                placeholder="Location"
+                                value={newProperty.location}
+                                onChange={handleInputChange}
+                                required
+                                disabled={isProcessing}
+                            />
+                            <Input
+                                name="price"
+                                type="number"
+                                step="0.01"
+                                placeholder="Price (ETH)"
+                                value={newProperty.price}
+                                onChange={handleInputChange}
+                                required
+                                disabled={isProcessing}
+                            />
+                            <Button 
+                                type="submit" 
+                                disabled={isProcessing || !contract}
+                                className="w-full"
+                            >
+                                {isProcessing ? (
+                                    <div className="flex items-center justify-center gap-2">
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        Processing...
+                                    </div>
+                                ) : 'List Property'}
+                            </Button>
+                        </form>
+                    </CardContent>
+                </Card>
+
+                <Card className="h-[calc(100vh-12rem)]">
+                    <CardHeader>
+                        <h2 className="text-xl font-semibold flex items-center gap-2">
+                            <Building className="h-5 w-5" />
+                            Listed Properties
+                        </h2>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                        <ScrollArea className="h-[calc(100vh-16rem)]">
+                            <div className="space-y-4 p-6">
+                                {properties.length === 0 ? (
+                                    <div className="text-center text-gray-500 py-8">
+                                        <Building className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                                        <p>No properties listed yet</p>
+                                        <p className="text-sm mt-2">Create your first property listing to get started</p>
+                                    </div>
+                                ) : (
+                                    properties.map((property, index) => (
+                                        <Card key={index} className="p-4 hover:shadow-lg transition-shadow duration-200">
+                                            <div className="space-y-3">
+                                                <div className="flex justify-between items-start">
+                                                    <h3 className="font-semibold text-lg">{property.title}</h3>
+                                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                                        property.isActive 
+                                                            ? 'bg-green-100 text-green-700'
+                                                            : 'bg-red-100 text-red-700'
+                                                    }`}>
+                                                        {property.isActive ? 'Active' : 'Sold'}
+                                                    </span>
+                                                </div>
+                                                
+                                                <div className="text-sm space-y-2">
+                                                    <p className="text-gray-600 italic">{property.description}</p>
+                                                    
+                                                    <div className="grid grid-cols-2 gap-4">
+                                                        <div>
+                                                            <p className="font-medium text-gray-600">Location</p>
+                                                            <p>{property.location}</p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-medium text-gray-600">Price</p>
+                                                            <p>{formatPrice(web3Instance, property.price)} ETH</p>
+                                                        </div>
+                                                    </div>
+
+
+                                                    <div>
+                                                        <p className="font-medium text-gray-600">Owner</p>
+                                                        <p className="truncate text-xs">{property.owner}</p>
+                                                    </div>
+                                                    
+                                                        
+
+
+                                                    <div className="flex justify-between items-center pt-2">
+                                                        <p className="text-xs text-gray-500">
+                                                     Listed: {new Date(Number(property.createdAt) * 1000).toLocaleDateString()}
+                                                        </p>
+                                                          <ContractDetails 
+                                                          property={property}
+                                                          formatPrice={(price) => formatPrice(web3Instance, price)}
+                                                           />
+                                                      </div>
+                                                </div>
+
+                                                {property.isActive && property.owner.toLowerCase() !== account.toLowerCase() && (
+                                                    <Button 
+                                                        onClick={() => handlePurchase(property.id)}
+                                                        disabled={isProcessing}
+                                                        className="w-full mt-4"
+                                                        variant="outline"
+                                                    >
+                                                        {isProcessing ? (
+                                                            <div className="flex items-center justify-center gap-2">
+                                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                                                Processing Purchase...
+                                                            </div>
+                                                        ) : 'Purchase Property'}
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </Card>
+                                    ))
+                                )}
+                            </div>
+                        </ScrollArea>
+                    </CardContent>
+                </Card>
+            </div>
         </div>
-        {property.isActive && property.owner.toLowerCase() !== account.toLowerCase() && (
-          <Button 
-            onClick={() => handlePurchase(property.id)}
-            disabled={loading}
-            className="w-full mt-2"
-          >
-            Purchase Property
-          </Button>
-        )}
-      </div>
-    </Card>
-  );
-
-  return (
-    <div className="container mx-auto p-4">
-      <Card className="mb-6">
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <h1 className="text-2xl font-bold">Real Estate DApp</h1>
-            <div className="flex gap-2">
-              <Button onClick={loadProperties} disabled={!contract} className="flex items-center gap-2">
-                <RefreshCw className="h-4 w-4" />
-                Refresh
-              </Button>
-              <Button onClick={connectWallet} className="flex items-center gap-2">
-                <Wallet className="h-4 w-4" />
-                {account ? `${account.slice(0, 6)}...${account.slice(-4)}` : 'Connect Wallet'}
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
-
-      {error && (
-        <Alert className="mb-6">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-
-      <div className="grid md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <h2 className="text-xl font-semibold flex items-center gap-2">
-              <Plus className="h-5 w-5" />
-              List New Property
-            </h2>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <Input
-                  name="id"
-                  placeholder="Property ID"
-                  value={newProperty.id}
-                  onChange={handleInputChange}
-                  required
-                />
-              </div>
-              <div>
-                <Input
-                  name="title"
-                  placeholder="Property Title"
-                  value={newProperty.title}
-                  onChange={handleInputChange}
-                  required
-                />
-              </div>
-              <div>
-                <Textarea
-                  name="description"
-                  placeholder="Property Description"
-                  value={newProperty.description}
-                  onChange={handleInputChange}
-                  required
-                />
-              </div>
-              <div>
-                <Input
-                  name="location"
-                  placeholder="Location"
-                  value={newProperty.location}
-                  onChange={handleInputChange}
-                  required
-                />
-              </div>
-              <div>
-                <Input
-                  name="price"
-                  type="number"
-                  step="0.01"
-                  placeholder="Price (ETH)"
-                  value={newProperty.price}
-                  onChange={handleInputChange}
-                  required
-                />
-              </div>
-              <Button 
-                type="submit" 
-                disabled={loading || !contract} 
-                className="w-full"
-              >
-                {loading ? 'Processing...' : 'List Property'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <h2 className="text-xl font-semibold flex items-center gap-2">
-              <Building className="h-5 w-5" />
-              Listed Properties
-            </h2>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {properties.length === 0 ? (
-                <p className="text-center text-gray-500">No properties listed yet</p>
-              ) : (
-                properties.map((property, index) => (
-                  <PropertyCard key={index} property={property} />
-                ))
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
+    );
 };
-
+export { RealEstateApp };  // Named export
 export default RealEstateApp;
