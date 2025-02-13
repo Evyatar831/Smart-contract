@@ -13,7 +13,7 @@ contract RealEstateContract {
         string[] documents;     // Array of document references (IPFS hashes or URLs)
         bool isActive;          // Whether the property is available for purchase
         uint256 createdAt;     // Timestamp when the property was listed
-       // bool isVerified;       // Whether the property has been verified
+       
     }
 
     struct Contract {
@@ -125,7 +125,7 @@ contract RealEstateContract {
             documents: _documents,
             isActive: true,
             createdAt: block.timestamp
-            //isVerified: false
+            
         });
 
         propertyIds.push(_id);
@@ -150,8 +150,7 @@ contract RealEstateContract {
         require(property.owner != msg.sender, "Property owner cannot purchase their own property");
         require(msg.value == property.price, "Payment amount must match property price");
         require(contracts[_contractId].buyer == address(0), "Contract ID already exists");
-        //require(property.isVerified, "Property must be verified before purchase");
-
+       
         // Calculate platform fee
         uint256 fee = (msg.value * platformFee) / 10000;
         uint256 sellerAmount = msg.value - fee;
@@ -218,18 +217,7 @@ contract RealEstateContract {
         );
     }
 
-    // function verifyProperty(string memory _propertyId) public onlyOwner propertyExists(_propertyId) {
-    //     Property storage property = properties[_propertyId];
-    //     require(!property.isVerified, "Property is already verified");
-
-    //     property.isVerified = true;
-
-    //     emit PropertyVerified(
-    //         _propertyId,
-    //         msg.sender,
-    //         block.timestamp
-    //     );
-    // }
+   
 
     // View Functions
     function getAllProperties() public view returns (Property[] memory) {

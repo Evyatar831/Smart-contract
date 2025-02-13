@@ -6,14 +6,44 @@
 - Node.js (v14+)
 - Python (3.8+)
 
+-npm (v6.14.0 or later)
+-Hardhat (v2.19.0 or later)
+-MetaMask browser extension
+
+
 ### Frontend Setup
 ```bash
-# Navigate to frontend directory
+
+
+
+### TERMINAL A- TO run the web site
 cd website\BlockEstate\frontend
-npm run
+npm run start
+############################
+
+### TERMINAL B- TO run the Server
+cd website\BlockEstate\backend
+#(for windows)
+env\Scripts\activate
+python manage.py runserver
+############################
+
+### TERMINAL C- TO deploy test blockchain
+cd "C:\Users\evyatar\Documents\Smart contract\real-estate-contract"
+npx hardhat node
+############################
+
+### TERMINAL D- TO deploy -RealEstateContract
+cd "C:\Users\evyatar\Documents\Smart contract\real-estate-contract"
+npx hardhat run scripts/deploy.js --network localhost
+############################
+
+
+
+
+
 # Install dependencies
 npm install
-
 # Start development server
 npm start
 ```
@@ -103,7 +133,7 @@ npm install
 
 
 
-### DEPLOYMENT  for  smart contract
+### DEPLOYMENT  for  Smart Contract!
 
 
 ### Prerequisites
